@@ -1,0 +1,1 @@
+{"id":"code-example-1","prompt":"Write a Python program that reads one integer and prints twice its value. Return only the code.","gold":{"kind":"stdin","inputs":["3\n","-4\n"],"outputs":["6\n","-8\n"]},"difficulty":"example"}

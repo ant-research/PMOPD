@@ -1,0 +1,7 @@
+torch>=2.1
+transformers>=4.45
+langchain>=0.0.325
+safetensors>=0.4
+peft>=0.12
+numpy>=1.24
+math-verify>=0.5
