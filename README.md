@@ -15,6 +15,8 @@ Ant Group
 
 PMOPD (**Projection-based Multi-Teacher On-Policy Distillation**) integrates multiple specialized teachers into a single language model while reducing cross-task interference. It represents each completed task stage with low-rank parameter-update subspaces and protects those directions during subsequent stages by projecting both gradients and optimizer updates.
 
+![Visualization of task-preferred update directions and the optimization trajectories of MOPD and PMOPD.](/.Visualization.png)
+
 This repository provides the training and evaluation code used for the Qwen2.5-7B and Llama-3.1-8B experiments in the paper.
 
 ## Repository structure
