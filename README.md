@@ -27,7 +27,8 @@ PMOPD/
 │   ├── train.py          # PMOPD and baseline training entry point
 │   ├── data.py           # training-data loader and validation
 │   ├── optimizer.py      # Adafactor and optimizer-update projection
-│   └── model_io.py       # student, teacher, and checkpoint loading
+│   ├── model_io.py       # student, teacher, and checkpoint loading
+│   └── diagnostics.py    # task-order and cycle-selection metrics
 ├── evaluation/
 │   ├── eval_math.py      # math evaluation
 │   ├── eval_reason.py    # multiple-choice reasoning evaluation
@@ -37,6 +38,9 @@ PMOPD/
 ├── scripts/
 │   ├── train_qwen25_7b.sh
 │   ├── train_llama31_8b.sh
+│   ├── probe_task_conflict.py
+│   ├── analyze_task_conflict.py
+│   ├── select_cycles.py
 │   └── eval_all.sh
 ├── data/
 │   ├── README.md         # public data format
@@ -135,7 +139,7 @@ python -m pmopd.train \
   --batch 16 --grad_accum 3 --lr 2e-6 \
   --subspace_rank 16 --kl_direction reverse --top_k_loss 256 \
   --max_prompt 768 --max_prompt_code 2048 --max_new 768 \
-  --save_all_stages
+  --save_initial --save_all_stages
 ```
 
 Important arguments:
@@ -145,12 +149,73 @@ Important arguments:
 - `--subspace_rank`: number of right-singular directions retained per matrix and task stage.
 - `--svd_device`: device used for subspace extraction; `cpu` reduces GPU memory usage.
 - `--pmopd_gradient_only`: project gradients but disable optimizer-update projection.
+- `--save_initial`: save the pre-training target matrices needed by the cycle diagnostic.
 - `--save_all_stages`: save a checkpoint after every task stage.
 
 Run the following command for the complete argument list:
 
 ```bash
 python -m pmopd.train --help
+```
+
+## Selecting the task order and cycle count
+
+### Select the task order
+
+Run one conflict probe for each anchor task, then aggregate the results. The
+summary produced by `analyze_task_conflict.py` gives the recommended task
+order.
+
+```bash
+for ANCHOR in math code reason; do
+  python scripts/probe_task_conflict.py \
+    --anchor "$ANCHOR" \
+    --base "$BASE_MODEL" --data_dir "$DATA_DIR" \
+    --teacher_math "$TEACHER_MATH" \
+    --teacher_code "$TEACHER_CODE" \
+    --teacher_reason "$TEACHER_REASON" \
+    --output_dir outputs/task_order_probe \
+    --student_gpu 0 --teacher_gpu 1 --svd_device cpu \
+    --n_folds 10 --rows_per_fold 60 --rank 16
+done
+
+python scripts/analyze_task_conflict.py \
+  outputs/task_order_probe/anchor_math.jsonl \
+  outputs/task_order_probe/anchor_code.jsonl \
+  outputs/task_order_probe/anchor_reason.jsonl \
+  --percent --output outputs/task_order_probe/task_conflict_summary.json
+```
+
+Use the recommended order as `--task_order` in the following training runs.
+
+### Select the cycle count
+
+Train each candidate cycle count with the same task order and data budget:
+
+```bash
+for CYCLES in 2 4 5 8 10; do
+  python -m pmopd.train \
+    --mode pmopd --task_order code reason math --cycles "$CYCLES" \
+    --full_data_epoch --epochs 1 \
+    --base "$BASE_MODEL" --data_dir "$DATA_DIR" \
+    --teacher_math "$TEACHER_MATH" \
+    --teacher_code "$TEACHER_CODE" \
+    --teacher_reason "$TEACHER_REASON" \
+    --output_dir "outputs/cycle_${CYCLES}" \
+    --gpu 0 --teacher_gpus 1 2 3 \
+    --batch 16 --grad_accum 3 --lr 2e-6 \
+    --subspace_rank 16 --kl_direction reverse --top_k_loss 256 \
+    --save_initial --save_all_stages
+done
+```
+
+Then run the selection script to determine the best cycle count:
+
+```bash
+python scripts/select_cycles.py \
+  --runs 2=outputs/cycle_2 4=outputs/cycle_4 5=outputs/cycle_5 \
+         8=outputs/cycle_8 10=outputs/cycle_10 \
+  --rank 16 --device cpu --output outputs/cycle_selection.json
 ```
 
 ## Evaluation
